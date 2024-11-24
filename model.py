@@ -8,8 +8,8 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 
 # Step 1: Load the Data
-positive_interactions = pd.read_csv('positive_Interaction_Pair.csv', header=None, names=['protein1', 'protein2'])
-negative_interactions = pd.read_csv('negative_Interaction_Pair.csv', header=None, names=['protein1', 'protein2'])
+positive_interactions = pd.read_csv('positive_sample.csv', header=None, names=['protein1', 'protein2'])
+negative_interactions = pd.read_csv('negative_sample.csv', header=None, names=['protein1', 'protein2'])
 
 # Step 2: Create the Interaction Graph
 G = nx.Graph()
@@ -121,4 +121,4 @@ for edge in test_edges:
             predicted_labels.append(predicted_label.item())  # Convert to scalar and append
 
 # Print the predicted labels for the test edges
-print("Predicted labels for test edges:", predicted_labels)
+#print("Predicted labels for test edges:", predicted_labels)
