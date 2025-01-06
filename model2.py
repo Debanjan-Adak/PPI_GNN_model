@@ -1,6 +1,8 @@
 import networkx as nx
 import torch
 import torch.nn as nn
+
+from torch_geometric.nn import GCNConv, global_mean_pool
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from torch_geometric.nn import GCNConv
@@ -51,10 +53,9 @@ edge_indices = list(train_edges)  # Use the original edges from the training set
 # Compute topological features
 node_features = torch.zeros(len(node_indices), 3)  # 3 features: degree, clustering coefficient, and eigenvector centrality
 for i, node in enumerate(node_indices):
-    node_features[i, 0] = G.degree[node]  # Degree
+    node_features[i,0 ] = G.degree[node]  # Degree
     node_features[i, 1] = nx.clustering(G, node)  # Clustering coefficient
-    node_features[i, 2] = nx.eigenvector_centrality(G).get(node, 0)  # Eigenvector centrality
-
+    node_features[i, 2] = nx.degree_assortativity_coefficient(G)  # Eigenvector centrality
 edge_features = torch.randn(len(edge_indices), 128)  # Random edge features
 
 print("Step 4 Done")
@@ -71,24 +72,76 @@ edge_index_tensor = torch.tensor(edge_indices).t().contiguous()
 data = Data(x=node_features, edge_index=edge_index_tensor, edge_attr=edge_features)
 print("Step 7 Done")
 # Step 8: Define the GNN Model
+
 class GNNModel(nn.Module):
+
     def __init__(self):
+
         super(GNNModel, self).__init__()
-        self.conv1 = GCNConv(3, 128)  # Input features are now 3 (topological features)
-        self.conv2 = GCNConv(128, 128)
-        self.dropout = nn.Dropout(p=0.5)  # Dropout layer for regularization
-        self.fc = nn.Linear(128, 2)  # Output layer for binary classification
+
+        
+
+        # Define the convolutional layers
+
+        self.conv1 = GCNConv(3, 64)  # Input features are 3 (topological features), output features are 64
+
+        self.conv2 = GCNConv(64, 128)  # Second layer with 128 output features
+
+        self.conv3 = GCNConv(128, 128)  # Third layer with 128 output features
+
+        
+
+        # Fully connected layers
+
+        self.fc1 = nn.Linear(128, 64)  # Fully connected layer
+
+        self.fc2 = nn.Linear(64, 2)     # Output layer for binary classification
+
 
     def forward(self, data):
+
         x, edge_index = data.x, data.edge_index
-        x = self.conv1(x, edge_index)
+
+        
+
+        # Pass through the convolutional layers
+
+        x = self.conv1(x, edge_index)  # First convolution
+
+        x = F.relu(x)                  # Apply ReLU activation
+
+        x = F.dropout(x, p=0.5)        # Apply dropout
+
+        
+
+        x = self.conv2(x, edge_index)  # Second convolution
+
+        x = F.relu(x)                  # Apply ReLU activation
+
+        x = F.dropout(x, p=0.5)        # Apply dropout
+
+        
+
+        x = self.conv3(x, edge_index)  # Third convolution
+
+        x = F.relu(x)                  # Apply ReLU activation
+
+        x = F.dropout(x, p=0.5)        # Apply dropout
+
+        
+
+        # No global pooling, return node-level features
+
+        x = self.fc1(x)
+
         x = F.relu(x)
-        x = self.dropout(x)  # Apply dropout
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = self.dropout(x)  # Apply dropout
-        x = self.fc(x)
+
+        x = self.fc2(x)  # Output layer
+
+        
+
         return x
+
 print("Step 8 Done")
 # Step 9: Train the GNN Model
 model = GNNModel()
@@ -97,25 +150,37 @@ criterion = nn.CrossEntropyLoss()
 # Convert train_labels to a tensor and ensure it has the correct shape
 train_labels_tensor = torch.tensor(train_labels)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+optimizer = torch.optim.Adam(model.parameters(), lr=0.005)
 
-for epoch in range(100):
+# Training loop
+# Step 9: Train the GNN Model
+model = GNNModel()
+criterion = nn.CrossEntropyLoss()
+
+# Convert train_labels to a tensor and ensure it has the correct shape and type
+train_labels_tensor = torch.tensor(train_labels, dtype=torch.long)  # Ensure labels are Long type
+
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+# Training loop
+for epoch in range(20):  # Increased from 20 to 100
     model.train()
     optimizer.zero_grad()
     
     # Forward pass
-    out = model(data)
+    out = model(data)  # Get the output for all nodes
     
-    # Ensure the output corresponds to the training edges
-    out = out[edge_index_tensor[0]]  # Select only the output for the nodes involved in the edges
+    # Select the output for the nodes involved in the edges
+    edge_node_indices = edge_index_tensor[0]  # Get the source nodes for the edges
+    out_edges = out[edge_node_indices]  # Select the output for the source nodes
     
     # Compute loss
-    loss = criterion(out, train_labels_tensor)  # Ensure labels are in tensor format
+    loss = criterion(out_edges, train_labels_tensor)  # Ensure labels are in tensor format
     loss.backward()
     optimizer.step()
     
     # Calculate accuracy
-    _, predicted = out.max(dim=1)  # Get the predicted class
+    _, predicted = out_edges.max(dim=1)  # Get the predicted class
     correct = (predicted == train_labels_tensor).sum().item()  # Count correct predictions
     accuracy = correct / train_labels_tensor.size(0)  # Calculate accuracy
     
