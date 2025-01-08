@@ -6,9 +6,10 @@ from torch_geometric.nn import GCNConv
 from sklearn.model_selection import KFold
 from sklearn.metrics import precision_score, recall_score, f1_score
 
+
 # Load positive and negative interaction data
-positive_df = pd.read_csv('positive_100.csv', header=None)  # No header
-negative_df = pd.read_csv('negative_100.csv', header=None)  # No header
+positive_df = pd.read_csv('positive_sample_7500_1.csv', header=None)  # No header
+negative_df = pd.read_csv('negative_sample_7500_2.csv', header=None)  # No header
 
 # Load amino acid sequences
 def load_protein_sequences(file_path):
@@ -30,18 +31,33 @@ unique_proteins = set(positive_df[0]).union(set(positive_df[1])).union(set(negat
 
 # Create a mapping from protein names to unique indices
 protein_to_index = {protein: idx for idx, protein in enumerate(unique_proteins)}
-
+#print(protein_to_index)
 # Add nodes to the HeteroData object
 for protein in unique_proteins:
     data['protein'][protein] = {}
 
-# Add edges for positive interactions using indices
-positive_edges = [(protein_to_index[row[0]], protein_to_index[row[1]]) for _, row in positive_df.iterrows()]
-positive_edge_index = torch.tensor(positive_edges, dtype=torch.long).t().contiguous()
-data['protein', 'interacts', 'protein'].edge_index = positive_edge_index  # Correct assignment
+# Create edges for positive interactions using indices
+positive_edges = []
+for _, row in positive_df.iterrows():
+    if row[0] in protein_to_index and row[1] in protein_to_index:
+        positive_edges.append((protein_to_index[row[0]], protein_to_index[row[1]]))
 
-# Add edges for negative interactions using indices
-negative_edges = [(protein_to_index[row[0]], protein_to_index[row[1]]) for _, row in negative_df.iterrows()]
+# Check if any edges are invalid
+if not positive_edges:
+    raise ValueError("No valid positive edges found.")
+
+positive_edge_index = torch.tensor(positive_edges, dtype=torch.long).t().contiguous()
+
+# Create edges for negative interactions using indices
+negative_edges = []
+for _, row in negative_df.iterrows():
+    if row[0] in protein_to_index and row[1] in protein_to_index:
+        negative_edges.append((protein_to_index[row[0]], protein_to_index[row[1]]))
+
+# Check if any edges are invalid
+if not negative_edges:
+    raise ValueError("No valid negative edges found.")
+
 negative_edge_index = torch.tensor(negative_edges, dtype=torch.long).t().contiguous()
 data['protein', 'does_not_interact', 'protein'].edge_index = negative_edge_index  # Correct assignment
 
@@ -61,6 +77,13 @@ for protein in unique_proteins:
         # Create a tensor for the one-hot encoded features
         feature_tensor = one_hot_encode(protein_sequences[protein])
         features.append(feature_tensor)
+    else:
+
+        # If a protein is missing, add a default feature vector (zero vector)
+
+        default_feature_tensor = torch.zeros(20)  # Assuming 20 features for one-hot encoding
+
+        features.append(default_feature_tensor)    
 
 # Convert the list of features to a tensor
 features_tensor = torch.stack(features)
@@ -68,13 +91,19 @@ features_tensor = torch.stack(features)
 # Assign the features tensor to the entire node type
 data['protein'].x = features_tensor  # This sets the x attribute for all protein nodes
 
+
+# After creating edge indices, check their maximum values
+# print(f"Max index in positive edge index: {positive_edge_index.max().item()}")
+# print(f"Max index in negative edge index: {negative_edge_index.max().item()}")
+# print(f"Size of node feature tensor: {data['protein'].x.size(0)}")
 # Define the GNN model
 class GNNModel(torch.nn.Module):
     def __init__(self):
         super(GNNModel, self).__init__()
-        self.conv1 = GCNConv(20, 64)  # Assuming 20 features from one-hot encoding
+        self.conv1 = GCNConv(20, 64)
         self.conv2 = GCNConv(64, 32)
-        self.fc = torch.nn.Linear(32, 1)  # Binary classification
+        self.conv3 = GCNConv(32, 16)  # Additional layer
+        self.fc = torch.nn.Linear(16, 1)
 
     def forward(self, data):
         x = data['protein'].x
@@ -84,16 +113,28 @@ class GNNModel(torch.nn.Module):
         x = F.relu(x)
         x = self.conv2(x, edge_index)
         x = F.relu(x)
+        x = self.conv3(x, edge_index)  # Pass through additional layer
+        x = F.relu(x)
 
-        # Gather edge features for the output
         row, col = edge_index
-        edge_features = x[row] + x[col]  # Combine features of connected nodes
-        output = self.fc(edge_features)  # Pass through a fully connected layer
-        return torch.sigmoid(output)  # Apply sigmoid to get probabilities
+        edge_features = x[row] + x[col]
+        output = self.fc(edge_features)
+        return torch.sigmoid(output)
 # Prepare data for training
 # Create labels for positive and negative interactions
 labels = torch.cat([torch.ones(len(positive_edges)), torch.zeros(len(negative_edges))])
 edges = torch.cat([positive_edge_index, negative_edge_index], dim=1)
+# Debugging: Check the sizes of positive and negative edges
+# print(f"Number of positive edges: {len(positive_edges)}")
+# print(f"Number of negative edges: {len(negative_edges)}")
+
+# # Check the edge indices
+# print(f"Positive edge index shape: {positive_edge_index.shape}")
+# print(f"Negative edge index shape: {negative_edge_index.shape}")
+
+# # Check the contents of the edge indices
+# print(f"Positive edge index: {positive_edge_index}")
+# print(f"Negative edge index: {negative_edge_index}")
 
 # Initialize KFold
 kf = KFold(n_splits=5, shuffle=True, random_state=42)
@@ -102,6 +143,15 @@ kf = KFold(n_splits=5, shuffle=True, random_state=42)
 precision_list = []
 recall_list = []
 f1_list = []
+
+# Debugging: Check the number of unique proteins and edge indices
+# for protein, index in protein_to_index.items():
+#     print(f"Protein: {protein}, Index: {index}")
+
+# # Check the edge index for out-of-bounds indices
+# print(f"Edge index: {positive_edge_index}")
+# print(f"Max index in edge index: {positive_edge_index.max().item()}")
+# print(f"Min index in edge index: {positive_edge_index.min().item()}")
 
 # Perform cross-validation
 for train_index, test_index in kf.split(edges.t().numpy()):
@@ -122,27 +172,32 @@ for train_index, test_index in kf.split(edges.t().numpy()):
 
     # Initialize model, optimizer, and loss function
     model = GNNModel()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.007)
     loss_fn = torch.nn.BCELoss()
-
-    # Print the train_data structure for debugging
-    print(train_data)
 
     # Train the model
     model.train()
     for epoch in range(100):  # You can adjust the number of epochs
-        optimizer.zero_grad()
+        optimizer.zero_grad()  # Zero the parameter gradients
+        
+        # Forward pass
         output = model(train_data)
-        # print(f"Output size: {output.size()}")
-        # print(f"Train labels size: {train_labels.size()}")
         
         # Ensure the output size matches the label size
         if output.size(0) != train_labels.size(0):
             raise ValueError(f"Output size {output.size(0)} does not match label size {train_labels.size(0)}")
 
+        # Calculate loss
         loss = loss_fn(output.view(-1), train_labels)
-        loss.backward()
-        optimizer.step()
+        loss.backward()  # Backward pass
+        optimizer.step()  # Optimize the model parameters
+
+        # Calculate accuracy
+        predicted_labels = (output.view(-1) > 0.5).float()
+        accuracy = (predicted_labels == train_labels).float().mean().item()
+
+        # Print loss and accuracy for the epoch
+        print(f'Epoch {epoch + 1}, Loss: {loss.item():.4f}, Accuracy: {accuracy:.4f}')
 
     # Evaluate the model
     model.eval()
