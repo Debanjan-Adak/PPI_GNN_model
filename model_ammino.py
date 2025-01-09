@@ -9,7 +9,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 
 # Load positive and negative interaction data
 positive_df = pd.read_csv('positive_sample_7500_1.csv', header=None)  # No header
-negative_df = pd.read_csv('negative_sample_7500_2.csv', header=None)  # No header
+negative_df = pd.read_csv('negative_sample_7500_1.csv', header=None)  # No header
 
 # Load amino acid sequences
 def load_protein_sequences(file_path):
@@ -178,7 +178,7 @@ for train_index, test_index in kf.split(edges.t().numpy()):
 
     # Initialize model, optimizer, and loss function
     model = GNNModel()
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.00826)
     loss_fn = torch.nn.BCELoss()
 
     # Train the model
