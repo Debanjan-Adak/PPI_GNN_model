@@ -7,8 +7,8 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import precision_score, recall_score, f1_score
 
 # Load positive and negative interaction data
-positive_df = pd.read_csv('positive_sample.csv', header=None)  # No header
-negative_df = pd.read_csv('negative_sample.csv', header=None)  # No header
+positive_df = pd.read_csv('positive_2500.csv', header=None)  # No header
+negative_df = pd.read_csv('negative_2500.csv', header=None)  # No header
 
 # Load amino acid sequences
 def load_protein_sequences(file_path):
